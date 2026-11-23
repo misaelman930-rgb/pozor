@@ -13,6 +13,7 @@
 }
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
+[hidden]{display:none!important}
 body{background:var(--bg-0);color:var(--fg);font:14px/1.45 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
 button,input,textarea,select{font:inherit;color:inherit}
 button{cursor:pointer}
@@ -299,8 +300,10 @@ input,select{background:var(--bg-0);border:1px solid var(--line);border-radius:6
   function openLogin(err){
     $('#login').hidden = false;
     $('#closeLogin').hidden = !S.me;
+    // Уже в чате: код не спрашиваем, меняем только ник.
+    $('#codeIn').hidden = !(S.needsCode && !S.ready);
     $('#loginErr').textContent = err || '';
-    $('#nameIn').value = S.me || localStorage.getItem('squad-name') || '';
+    if (!$('#nameIn').value) $('#nameIn').value = S.me || localStorage.getItem('squad-name') || '';
     $('#loginBtn').disabled = false;
     setTimeout(function(){ $('#nameIn').focus(); }, 0);
   }
@@ -381,12 +384,12 @@ input,select{background:var(--bg-0);border:1px solid var(--line);border-radius:6
     e.preventDefault();
     var name = $('#nameIn').value.trim().slice(0, 20);
     if (!name) return openLogin('Введи ник');
-    var code = $('#codeIn').hidden ? '' : $('#codeIn').value.trim();
-    S.code = code;
+    var code = $('#codeIn').hidden ? S.code : $('#codeIn').value.trim();
     $('#loginBtn').disabled = true;
     fetch('/api/check?code=' + encodeURIComponent(code), {cache:'no-store'}).then(function(r){
       if (r.status === 403) { $('#loginBtn').disabled = false; return openLogin('Неверный код доступа'); }
       if (!r.ok) { $('#loginBtn').disabled = false; return openLogin('Не получилось войти'); }
+      S.code = code;
       connect(name);
     }).catch(function(){ $('#loginBtn').disabled = false; openLogin('Нет связи с сервером'); });
   });
@@ -404,6 +407,7 @@ input,select{background:var(--bg-0);border:1px solid var(--line);border-radius:6
 
   fetch('/api/config').then(function(r){ return r.json(); }).then(function(cfg){
     S.reactions = cfg.reactions || S.reactions;
+    S.needsCode = !!cfg.needsCode;
     if (cfg.needsCode) {
       $('#codeIn').hidden = false;
       $('#codeIn').value = localStorage.getItem('squad-code') || '';
