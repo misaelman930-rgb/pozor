@@ -134,6 +134,18 @@ input,select{background:var(--bg-0);border:1px solid var(--line);border-radius:6
 .closex{position:absolute;right:8px;top:6px;background:none;border:0;color:var(--fg-3);font-size:22px;padding:4px 8px;line-height:1}
 .closex:hover{color:var(--fg)}
 
+.card.wide{width:min(520px,100%);max-height:88vh;overflow-y:auto}
+.codelist{display:flex;flex-direction:column;gap:6px}
+.crow{display:flex;align-items:center;gap:8px;background:var(--bg-0);border:1px solid var(--line);border-radius:8px;padding:8px;min-width:0}
+.crow .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crow code{font-family:ui-monospace,Consolas,monospace;color:var(--fg-2);font-size:13px}
+.badge{font-size:11px;border-radius:999px;padding:1px 7px;border:1px solid var(--line);color:var(--fg-3);white-space:nowrap}
+.badge.admin{color:var(--warn);border-color:var(--warn)}
+.badge.mod{color:var(--ok);border-color:var(--ok)}
+.small-btn{padding:5px 8px;font-size:12px;flex:none}
+.newcode{background:var(--bg-0);border:1px dashed var(--ok);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:6px}
+.newcode code{font-size:18px;font-family:ui-monospace,Consolas,monospace;letter-spacing:.05em;overflow-wrap:anywhere}
+#panelBtn{width:100%;margin-bottom:6px}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--bg-3);color:var(--fg);padding:10px 14px;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.4);z-index:6;max-width:calc(100% - 32px)}
 
 #remotes{display:none}
@@ -182,6 +194,7 @@ input,select{background:var(--bg-0);border:1px solid var(--line);border-radius:6
     </div>
 
     <div class="me">
+      <button class="ghost" id="panelBtn" type="button" hidden>Панель</button>
       <button class="me-btn" id="meBtn" type="button" title="Сменить ник">
         <span class="av" id="meAv"></span>
         <span class="me-text">
@@ -222,6 +235,21 @@ input,select{background:var(--bg-0);border:1px solid var(--line);border-radius:6
     <div class="err" id="loginErr"></div>
     <button class="primary" type="submit" id="loginBtn">Войти</button>
   </form>
+</div>
+
+<div class="overlay" id="panel" hidden>
+  <div class="card wide" role="dialog" aria-label="Панель">
+    <button class="closex" id="closePanel" type="button" aria-label="Закрыть">×</button>
+    <h2>Панель</h2>
+    <p class="hint" id="panelHint"></p>
+    <form id="codeForm" style="display:flex;flex-direction:column;gap:8px">
+      <div class="row"><input id="cName" maxlength="20" placeholder="Ник" autocomplete="off" aria-label="Ник"><select id="cRole" aria-label="Роль"></select></div>
+      <div class="row"><button class="primary" type="submit">Создать код</button></div>
+    </form>
+    <div id="newCode"></div>
+    <div class="section-label" style="padding:4px 0 0">Коды</div>
+    <div class="codelist" id="codeList"></div>
+  </div>
 </div>
 
 <script>
@@ -329,6 +357,7 @@ input,select{background:var(--bg-0);border:1px solid var(--line);border-radius:6
 
     on('hello', function(d){
       S.channels = d.channels;
+      S.role = d.role || 'member';
       S.roles = d.roles;
       S.members = d.members;
       S.voice = d.voice;
@@ -386,8 +415,8 @@ input,select{background:var(--bg-0);border:1px solid var(--line);border-radius:6
     if (!name) return openLogin('Введи ник');
     var code = $('#codeIn').hidden ? S.code : $('#codeIn').value.trim();
     $('#loginBtn').disabled = true;
-    fetch('/api/check?code=' + encodeURIComponent(code), {cache:'no-store'}).then(function(r){
-      if (r.status === 403) { $('#loginBtn').disabled = false; return openLogin('Неверный код доступа'); }
+    fetch('/api/check?code=' + encodeURIComponent(code) + '&name=' + encodeURIComponent(name), {cache:'no-store'}).then(function(r){
+      if (r.status === 403) { $('#loginBtn').disabled = false; return openLogin('Неверный код или ник'); }
       if (!r.ok) { $('#loginBtn').disabled = false; return openLogin('Не получилось войти'); }
       S.code = code;
       connect(name);
@@ -401,6 +430,7 @@ input,select{background:var(--bg-0);border:1px solid var(--line);border-radius:6
   document.addEventListener('keydown', function(e){
     if (e.key === 'Escape') {
       if (!$('#login').hidden && S.me) closeLogin();
+      if (!$('#panel').hidden) closePanel();
       if (!$('#addForm').hidden) $('#addForm').hidden = true;
     }
   });
@@ -415,8 +445,8 @@ input,select{background:var(--bg-0);border:1px solid var(--line);border-radius:6
     S.code = cfg.needsCode ? (localStorage.getItem('squad-code') || '') : '';
     var saved = localStorage.getItem('squad-name');
     if (saved && (!cfg.needsCode || S.code)) {
-      fetch('/api/check?code=' + encodeURIComponent(S.code), {cache:'no-store'}).then(function(r){
-        if (r.status === 403) { openLogin('Неверный код доступа'); return; }
+      fetch('/api/check?code=' + encodeURIComponent(S.code) + '&name=' + encodeURIComponent(saved), {cache:'no-store'}).then(function(r){
+        if (r.status === 403) { openLogin('Неверный код или ник'); return; }
         connect(saved);
       }).catch(function(){ openLogin(); });
     } else {
@@ -561,7 +591,7 @@ input,select{background:var(--bg-0);border:1px solid var(--line);border-radius:6
     var membersHTML = '<div class="section-label">Участники</div>' + list.map(function(m){
       var c = (m.roles || []).filter(function(r){ return r.color; })[0];
       var row = '<button class="mem' + (m.id === S.id ? ' me-row' : '') + '" type="button" data-mem="' + esc(m.name) + '">' +
-        avatar(m.name) + '<span class="name" style="' + (c ? 'color:' + esc(c.color) : '') + '">' + esc(m.name) + (m.id === S.id ? ' (ты)' : '') + '</span></button>';
+        avatar(m.name) + '<span class="name" style="' + (c ? 'color:' + esc(c.color) : '') + '">' + esc(m.name) + (m.id === S.id ? ' (ты)' : '') + '</span>' + (m.role === 'admin' ? '<span class="badge admin">админ</span>' : m.role === 'mod' ? '<span class="badge mod">модер</span>' : '') + '</button>';
       if (S.expanded === m.name) {
         row += '<div class="mem-roles">' + (S.roles.length
           ? S.roles.map(function(r){
@@ -588,6 +618,7 @@ input,select{background:var(--bg-0);border:1px solid var(--line);border-radius:6
   function renderMe(){
     var name = S.me || '?';
     $('#meName').textContent = S.me || 'Войти';
+    $('#panelBtn').hidden = !isStaff();
     $('#meAv').outerHTML = '<span class="av" id="meAv" style="--h:' + hue(name) + '">' + esc(name.charAt(0).toUpperCase()) + '</span>';
   }
 
@@ -710,6 +741,80 @@ input,select{background:var(--bg-0);border:1px solid var(--line);border-radius:6
     api('/api/role', { id: S.id, name: name, color: color }).then(function(){
       S.roleFormOpen = false;
       renderMembers();
+    }).catch(function(err){ toast(err.message); });
+  });
+
+  // ----- Панель: коды доступа -----
+
+  function isStaff(){ return S.role === 'admin' || S.role === 'mod'; }
+  function roleLabel(r){ return r === 'admin' ? 'админ' : r === 'mod' ? 'модер' : 'обычный'; }
+
+  function copyText(t){
+    var p = navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject(new Error('no clipboard'));
+    p.then(function(){ toast('Скопировано'); }).catch(function(){ toast('Не вышло скопировать, выдели код вручную'); });
+  }
+
+  function openPanel(){
+    if (!isStaff()) return;
+    $('#panel').hidden = false;
+    $('#panelHint').textContent = S.role === 'admin'
+      ? 'Админ может создавать обычные коды и коды модеров.'
+      : 'Модер может создавать обычные коды и удалять их.';
+    $('#cRole').innerHTML = S.role === 'admin'
+      ? '<option value="member">Обычный</option><option value="mod">Модер</option>'
+      : '<option value="member">Обычный</option>';
+    $('#newCode').innerHTML = '';
+    loadCodes();
+    setTimeout(function(){ $('#cName').focus(); }, 0);
+  }
+  function closePanel(){ $('#panel').hidden = true; }
+
+  function loadCodes(){
+    api('/api/codes/list', { id: S.id }).then(function(d){
+      $('#codeList').innerHTML = d.codes.map(function(c){
+        var isMe = c.name.toLowerCase() === (S.me || '').toLowerCase();
+        var canDel = !isMe && (c.role === 'member' || (c.role === 'mod' && S.role === 'admin'));
+        return '<div class="crow">' +
+          '<div class="n">' + esc(c.name) + ' <span class="badge ' + c.role + '">' + roleLabel(c.role) + '</span></div>' +
+          '<code>' + esc(c.code) + '</code>' +
+          '<button class="ghost small-btn" type="button" data-copy="' + esc(c.code) + '">Копировать</button>' +
+          (canDel ? '<button class="ghost small-btn" type="button" data-delcode="' + esc(c.code) + '">Удалить</button>' : '') +
+        '</div>';
+      }).join('') || '<div class="hint">Кодов пока нет</div>';
+    }).catch(function(err){ toast(err.message); });
+  }
+
+  $('#panelBtn').addEventListener('click', openPanel);
+  $('#closePanel').addEventListener('click', closePanel);
+  $('#panel').addEventListener('click', function(e){
+    if (e.target === this) return closePanel();
+    var cp = e.target.closest('[data-copy]');
+    if (cp) return copyText(cp.getAttribute('data-copy'));
+    var dl = e.target.closest('[data-delcode]');
+    if (dl) {
+      // Первое нажатие просит подтвердить, второе удаляет.
+      if (dl.getAttribute('data-armed') !== '1') {
+        dl.setAttribute('data-armed', '1');
+        dl.textContent = 'Точно?';
+        return;
+      }
+      api('/api/codes/delete', { id: S.id, code: dl.getAttribute('data-delcode') })
+        .then(function(){ toast('Код удалён'); loadCodes(); })
+        .catch(function(err){ toast(err.message); });
+    }
+  });
+  $('#codeForm').addEventListener('submit', function(e){
+    e.preventDefault();
+    var name = $('#cName').value.trim();
+    if (!name) return toast('Введи ник');
+    api('/api/codes/create', { id: S.id, name: name, role: $('#cRole').value }).then(function(d){
+      $('#cName').value = '';
+      $('#newCode').innerHTML = '<div class="newcode">' +
+        '<span class="hint">Код для ' + esc(d.name) + ' (' + roleLabel(d.role) + '):</span>' +
+        '<code>' + esc(d.code) + '</code>' +
+        '<div class="row"><button class="primary small-btn" type="button" data-copy="' + esc(d.code) + '">Копировать</button></div>' +
+      '</div>';
+      loadCodes();
     }).catch(function(err){ toast(err.message); });
   });
 
